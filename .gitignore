@@ -1,3 +1,60 @@
-.env
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.py[cod]
+*.so
+
+# Flask environment
+.env
+.venv/
+venv/
+ENV/
+env/
+instance/
+*.sqlite3
+*.db
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Bolt build files
+node_modules/
+dist/
+build/
+.cache/
+
+# Environment
+*.env.local
+*.env.development
+*.env.production
+*.env.*
+
+# Cookies or session files (for local testing)
+cookies.txt
+
+# Python virtual environment on Windows
+Scripts/
+Lib/
+Include/
+
+# Render deployment cache (if any)
+.render/
+
+# Misc
+*.bak
+*.tmp
+
+# Jupyter notebooks (if any)
+.ipynb_checkpoints/

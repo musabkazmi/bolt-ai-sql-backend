@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: ai-sql-backend
+    env: python
+    plan: free
+    region: frankfurt  # Or change to your closest region
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: OPENAI_API_KEY
+        value: YOUR_OPENAI_API_KEY
+      - key: DB_HOST
+        value: aws-0-eu-central-1.pooler.supabase.com
+      - key: DB_PORT
+        value: "6543"
+      - key: DB_NAME
+        value: postgres
+      - key: DB_USER
+        value: postgres.ungvhpjmntrxnyvdtjqr
+      - key: DB_PASSWORD
+        value: YOUR_DATABASE_PASSWORD

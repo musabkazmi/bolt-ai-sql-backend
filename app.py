@@ -23,7 +23,6 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 
 def execute_sql(sql_query):
     conn = None
-
     try:
         conn = psycopg2.connect(
             host=DB_HOST,
@@ -50,6 +49,53 @@ def execute_sql(sql_query):
     finally:
         if conn is not None:
             conn.close()
+
+
+def generate_natural_response(user_message, sql_query, query_result):
+    try:
+        prompt = f"""
+You are an AI assistant for a restaurant management system.
+
+Given:
+- The user question.
+- The SQL query used.
+- The database query result.
+
+Your job is to write a clear, helpful natural language response to the user.
+
+Example:
+User Question: "How many pending orders?"
+SQL Query: SELECT COUNT(*) FROM orders WHERE status = 'pending';
+Result: {{ "count": 1 }}
+→ Response: "There is 1 pending order."
+
+Example:
+User Question: "Get all menu items in the dessert category."
+SQL Query: SELECT * FROM menu_items WHERE category = 'dessert';
+Result: [{{name: "Ice Cream", price: 4.99}}, ...]
+→ Response: "There are 2 items in the dessert category: Ice Cream ($4.99), Cake ($5.99)."
+
+Now process this:
+User Question: "{user_message}"
+SQL Query: {sql_query}
+Result: {query_result}
+
+Response:
+"""
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that explains database query results."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        print("Error generating natural language response:", e)
+        return None
 
 
 @app.route('/ai/query', methods=['POST'])
@@ -87,15 +133,25 @@ SQL query:
 
         result = execute_sql(sql_query)
 
+        if "error" in result:
+            return jsonify({
+                "sql_query": sql_query,
+                "result": result,
+                "answer": "There was an error executing the SQL query."
+            })
+
+        natural_response = generate_natural_response(user_message, sql_query, result)
+
         return jsonify({
             "sql_query": sql_query,
-            "result": result
+            "result": result,
+            "answer": natural_response
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# Optional for local testing; Render uses gunicorn so doesn't need this
+# Optional for local testing
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -21,7 +21,8 @@ DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
-def execute_sql(sql_query):
+
+def fetch_table(query):
     conn = None
     try:
         conn = psycopg2.connect(
@@ -32,16 +33,11 @@ def execute_sql(sql_query):
             password=DB_PASSWORD
         )
         with conn.cursor() as cur:
-            cur.execute(sql_query)
-
-            if cur.description:
-                rows = cur.fetchall()
-                columns = [desc[0] for desc in cur.description]
-                result = [dict(zip(columns, row)) for row in rows]
-                return result
-            else:
-                conn.commit()
-                return {"status": "Query executed successfully"}
+            cur.execute(query)
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description]
+            result = [dict(zip(columns, row)) for row in rows]
+            return result
 
     except Exception as e:
         return {"error": str(e)}
@@ -51,107 +47,90 @@ def execute_sql(sql_query):
             conn.close()
 
 
-def generate_natural_response(user_message, sql_query, query_result):
-    try:
-        prompt = f"""
-You are an AI assistant for a restaurant management system.
+def build_context_string(menu_items, orders, users):
+    menu_text = "\n".join([
+        f"- {item['name']} (${item['price']}) - {item['category']}" +
+        (f" | {item['description']}" if item.get('description') else "")
+        for item in menu_items
+    ])
 
-Given:
-- The user question.
-- The SQL query used.
-- The database query result.
+    orders_text = "\n".join([
+        f"- Order {o['id']}: {o['status'].capitalize()}, Customer: {o.get('customer_name', 'Unknown')}, "
+        f"Table: {o.get('table_number', 'N/A')}, Total: ${o['total']}"
+        for o in orders
+    ])
 
-Your job is to write a clear, helpful natural language response to the user.
+    users_text = "\n".join([
+        f"- {u.get('name', u.get('id'))} ({u.get('role', 'Unknown')})"
+        for u in users
+    ])
 
-Example:
-User Question: "How many pending orders?"
-SQL Query: SELECT COUNT(*) FROM orders WHERE status = 'pending';
-Result: {{ "count": 1 }}
-→ Response: "There is 1 pending order."
+    context = f"""
+You are an AI assistant for a restaurant. Here is the current data:
 
-Example:
-User Question: "Get all menu items in the dessert category."
-SQL Query: SELECT * FROM menu_items WHERE category = 'dessert';
-Result: [{{name: "Ice Cream", price: 4.99}}, ...]
-→ Response: "There are 2 items in the dessert category: Ice Cream ($4.99), Cake ($5.99)."
+📜 Menu:
+{menu_text}
 
-Now process this:
-User Question: "{user_message}"
-SQL Query: {sql_query}
-Result: {query_result}
+📦 Orders:
+{orders_text}
 
-Response:
+👥 Users:
+{users_text}
+
+Use this information to answer questions accurately about the restaurant. 
+If the question cannot be answered from this data, say: 'This information is not available.'
 """
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant that explains database query results."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=200,
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-
-    except Exception as e:
-        print("Error generating natural language response:", e)
-        return None
+    return context
 
 
-@app.route('/ai/query', methods=['POST'])
-def ai_to_sql():
+@app.route('/ai/chat', methods=['POST'])
+def chat_with_context():
     data = request.json
     user_message = data.get("message")
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
+    # Fetch all relevant tables
+    menu_items = fetch_table("SELECT * FROM menu_items")
+    orders = fetch_table("SELECT * FROM orders ORDER BY created_at DESC LIMIT 20;")  # Recent 20 orders
+    users = fetch_table("SELECT * FROM users")
+
+    if any(isinstance(table, dict) and "error" in table for table in [menu_items, orders, users]):
+        return jsonify({"error": "Database fetch error", "details": [menu_items, orders, users]}), 500
+
+    # Build context string
+    context = build_context_string(menu_items, orders, users)
+
     try:
-        prompt = f"""
-You are an AI assistant that converts natural language into SQL SELECT queries.
-Database has tables: menu_items, orders, users.
-Only write SELECT queries. Never write DELETE, UPDATE, DROP, or INSERT.
-
-User message: {user_message}
-
-SQL query:
-"""
-
+        # Send to OpenAI
         response = client.chat.completions.create(
             model="gpt-4",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that generates SQL queries."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": context},
+                {"role": "user", "content": user_message}
             ],
-            max_tokens=150,
-            temperature=0
+            max_tokens=500,
+            temperature=0.5
         )
 
-        sql_query = response.choices[0].message.content.strip()
-
-        print(f"Generated SQL: {sql_query}")
-
-        result = execute_sql(sql_query)
-
-        if "error" in result:
-            return jsonify({
-                "sql_query": sql_query,
-                "result": result,
-                "answer": "There was an error executing the SQL query."
-            })
-
-        natural_response = generate_natural_response(user_message, sql_query, result)
+        answer = response.choices[0].message.content.strip()
 
         return jsonify({
-            "sql_query": sql_query,
-            "result": result,
-            "answer": natural_response
+            "answer": answer,
+            "context_used": context  # Optional, for debug
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# Optional for local testing
+# Optional health check
+@app.route('/')
+def index():
+    return "Restaurant AI Backend is running."
+
+
+# For local run
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
